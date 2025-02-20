@@ -8,6 +8,7 @@ from markdown import (
     unordered_list_to_html_node,
     ordered_list_to_html_node,
     markdown_to_html_node,
+    extract_title,
 )
 
 class TestMarkdownToHTML(unittest.TestCase):
@@ -117,6 +118,23 @@ def hello():
         self.assertEqual(node.children[3].tag, "ul")
         self.assertEqual(node.children[4].tag, "pre")
         self.assertEqual(node.children[5].tag, "blockquote")
+
+    def test_extract_title_basic(self):
+        markdown = "# Hello, World!\nThis is a test"
+        self.assertEqual(extract_title(markdown), "Hello, World!")
+
+    def test_extract_title_with_spaces(self):
+        markdown = "   #    Spaced Title    \nThis is a test"
+        self.assertEqual(extract_title(markdown), "Spaced Title")
+
+    def test_extract_title_no_header(self):
+        markdown = "This is a test\nNo header here"
+        with self.assertRaises(ValueError):
+            extract_title(markdown)
+
+    def test_extract_title_multiple_headers(self):
+        markdown = "# First Header\n## Second Header\n# Another First"
+        self.assertEqual(extract_title(markdown), "First Header")
 
 if __name__ == "__main__":
     unittest.main()

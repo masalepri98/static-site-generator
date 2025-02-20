@@ -1,6 +1,6 @@
 from htmlnode import HTMLNode, LeafNode, ParentNode
 from textnode import TextNode, TextType
-from text_processing import text_to_textnodes, markdown_to_blocks
+from text_processing import text_to_textnodes
 from block import block_to_block_type, BlockType
 
 def text_to_children(text):
@@ -13,16 +13,17 @@ def text_to_children(text):
             if node.text:
                 children.append(LeafNode(None, node.text))
         elif node.text_type == TextType.BOLD:
-            children.append(ParentNode("strong", [LeafNode(None, node.text)]))
+            children.append(ParentNode("b", [LeafNode(None, node.text)]))
         elif node.text_type == TextType.ITALIC:
-            children.append(ParentNode("em", [LeafNode(None, node.text)]))
+            children.append(ParentNode("i", [LeafNode(None, node.text)]))
         elif node.text_type == TextType.CODE:
-            children.append(ParentNode("code", [LeafNode(None, node.text)]))
+            # For inline code, use just code tag
+            text_value = node.text.strip() if node.text else " "
+            children.append(ParentNode("code", [LeafNode(None, text_value)]))
         elif node.text_type == TextType.LINK:
             children.append(ParentNode("a", [LeafNode(None, node.text)], {"href": node.url}))
         elif node.text_type == TextType.IMAGE:
             children.append(LeafNode("img", " ", {"src": node.url, "alt": node.text}))
-            children.append(LeafNode(None, " "))  # Add space after image
     
     return children
 
@@ -48,21 +49,23 @@ def heading_to_html_node(block):
     return ParentNode(f"h{level}", children)
 
 def code_to_html_node(block):
-    """Convert a code block to an HTMLNode"""
-    if "\n" in block:
-        # Multi-line code block
-        lines = block.split("\n")
-        if len(lines) > 2:
-            # Extract language if specified
-            language = lines[0].replace("```", "").strip()
-            code = "\n".join(lines[1:-1])
-            code_node = ParentNode("code", [LeafNode(None, code)], {})
-            if language:
-                code_node.props["class"] = f"language-{language}"
-            return ParentNode("pre", [code_node])
-    # Inline code
-    code = block.replace("```", "").strip()
-    return ParentNode("pre", [ParentNode("code", [LeafNode(None, code)])])
+    """Convert a code block to an HTML node"""
+    # Remove the ``` markers and any language identifier
+    lines = block.split('\n')
+    if len(lines) == 1:  # Inline code
+        code = lines[0].strip('`').strip()
+        return ParentNode("pre", [ParentNode("code", [LeafNode(None, code)])])
+    
+    # Get language if specified
+    lang = lines[0].strip().replace('```', '').strip()
+    props = {"class": f"language-{lang}"} if lang else None
+    
+    # Remove opening and closing ``` lines
+    code_lines = lines[1:-1]
+    code_content = '\n'.join(code_lines)
+    
+    # Create the HTML structure
+    return ParentNode("pre", [ParentNode("code", [LeafNode(None, code_content)], props)])
 
 def quote_to_html_node(block):
     """Convert a quote block to an HTMLNode"""
@@ -98,33 +101,74 @@ def ordered_list_to_html_node(block):
     children = [list_item_to_html_node(item) for item in items]
     return ParentNode("ol", children)
 
+def markdown_to_blocks(markdown):
+    """Split a markdown string into a list of block strings."""
+    blocks = []
+    current_block = []
+    in_code_block = False
+    
+    for line in markdown.split("\n"):
+        if line.startswith("```"):
+            if in_code_block:
+                # End of code block
+                current_block.append(line)
+                blocks.append("\n".join(current_block))
+                current_block = []
+                in_code_block = False
+            else:
+                # Start of code block
+                if current_block:
+                    blocks.append("\n".join(current_block))
+                current_block = [line]
+                in_code_block = True
+        elif in_code_block:
+            current_block.append(line)
+        elif line == "":
+            if current_block:
+                blocks.append("\n".join(current_block))
+                current_block = []
+        else:
+            current_block.append(line)
+    
+    if current_block:
+        blocks.append("\n".join(current_block))
+    
+    return [block for block in blocks if block.strip()]
+
 def markdown_to_html_node(markdown):
-    """Convert a markdown string to an HTMLNode object.
-    The returned HTMLNode will be a div containing the converted HTML.
-
-    Args:
-        markdown: A string containing markdown formatted text
-
-    Returns:
-        HTMLNode: A div element containing the converted HTML
-    """
-    if not markdown:
-        return HTMLNode(tag="div", children=[])  # Initialize empty div with empty children list
+    """Convert a markdown string to an HTML node."""
+    if not markdown.strip():
+        return HTMLNode(tag="div", value=None, children=[], props=None)
         
     blocks = markdown_to_blocks(markdown)
     children = []
     for block in blocks:
-        block_type = block_to_block_type(block)
-        if block_type == BlockType.PARAGRAPH:
-            children.append(paragraph_to_html_node(block))
-        elif block_type == BlockType.HEADING:
+        if block.startswith("#"):
             children.append(heading_to_html_node(block))
-        elif block_type == BlockType.CODE:
+        elif block.startswith("```"):
             children.append(code_to_html_node(block))
-        elif block_type == BlockType.QUOTE:
+        elif block.startswith(">"):
             children.append(quote_to_html_node(block))
-        elif block_type == BlockType.UNORDERED_LIST:
+        elif block.startswith("* "):
             children.append(unordered_list_to_html_node(block))
-        elif block_type == BlockType.ORDERED_LIST:
+        elif block.startswith("1. "):
             children.append(ordered_list_to_html_node(block))
+        else:
+            children.append(paragraph_to_html_node(block))
     return ParentNode("div", children)
+
+def extract_title(markdown):
+    """
+    Extract the title (h1) from a markdown string.
+    Args:
+        markdown: A string containing markdown formatted text
+    Returns:
+        str: The text from the first h1 header
+    Raises:
+        ValueError: If no h1 header is found
+    """
+    lines = markdown.split('\n')
+    for line in lines:
+        if line.strip().startswith('# '):
+            return line.strip().removeprefix('# ').strip()
+    raise ValueError("No h1 header found in markdown file")
